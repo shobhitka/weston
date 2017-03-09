@@ -58,6 +58,7 @@
 #include "weston.h"
 
 #include "compositor-drm.h"
+#include "compositor-hwc.h"
 #include "compositor-headless.h"
 #include "compositor-rdp.h"
 #include "compositor-fbdev.h"
@@ -1210,6 +1211,23 @@ drm_backend_output_configure(struct wl_listener *listener, void *data)
 	weston_output_enable(output);
 }
 
+static void
+hwc_backend_output_configure(struct wl_listener *listener, void *data)
+{
+	struct weston_output *output = data;
+	const struct weston_hwc_output_api *api = weston_hwc_output_get_api(output->compositor);
+
+	if (api->set_mode(output) < 0) {
+		weston_log("Cannot configure an output using weston_hwc_output_api.\n");
+		return;
+	}
+
+	wet_output_set_scale(output, NULL, 1, 0);
+	wet_output_set_transform(output, NULL, WL_OUTPUT_TRANSFORM_NORMAL, UINT32_MAX);
+
+	weston_output_enable(output);
+}
+
 static int
 load_drm_backend(struct weston_compositor *c,
 		 int *argc, char **argv, struct weston_config *wc)
@@ -1249,6 +1267,24 @@ load_drm_backend(struct weston_compositor *c,
 
 	free(config.gbm_format);
 	free(config.seat_id);
+
+	return ret;
+}
+
+static int
+load_hwc_backend(struct weston_compositor *c,
+		 int *argc, char **argv, struct weston_config *wc)
+{
+	struct weston_drm_backend_config config = {{ 0, }};
+	int ret = 0;
+
+	config.base.struct_version = WESTON_HWC_BACKEND_CONFIG_VERSION;
+	config.base.struct_size = sizeof(struct weston_hwc_backend_config);
+
+	ret = weston_compositor_load_backend(c, WESTON_BACKEND_HWC,
+					     &config.base);
+
+	wet_set_pending_output_handler(c, hwc_backend_output_configure);
 
 	return ret;
 }
@@ -1726,6 +1762,8 @@ load_backend(struct weston_compositor *compositor, const char *backend,
 		return load_fbdev_backend(compositor, argc, argv, config);
 	else if (strstr(backend, "drm-backend.so"))
 		return load_drm_backend(compositor, argc, argv, config);
+	else if (strstr(backend, "hwc-backend.so"))
+		return load_hwc_backend(compositor, argc, argv, config);
 	else if (strstr(backend, "x11-backend.so"))
 		return load_x11_backend(compositor, argc, argv, config);
 	else if (strstr(backend, "wayland-backend.so"))
